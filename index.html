@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Burger Ingredient Collecting Game</title>
+  <style>
+    body { margin: 0; }
+    canvas { display: block; }
+    #ui {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      font-family: Arial, sans-serif;
+      font-size: 20px;
+      z-index: 10;
+    }
+  </style>
+</head>
+<body>
+  <!-- UI to display credits -->
+  <div id="ui">
+    Credits: <span id="credits">0</span>
+  </div>
+
+  <!-- Importing Three.js and OrbitControls -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.115.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.115.0/examples/js/controls/OrbitControls.js"></script>
+<!-- Add jQuery before your existing scripts -->
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/18.6.4/Tween.min.js"></script>
+
+<div id="ingredientMenu" style="display:none; position:absolute; top: 50px; left: 50px; background:white; border:1px solid black; padding:10px;">
+  <h3>Burger Ingredients</h3>
+  <ul id="ingredientList"></ul>
+  <button id="closeMenu">Close</button>
+</div>
+
+  <script>
+    let scene, camera, renderer, controls;
+    let box, burger, topBun, selectedObject = null;
+    let targetPosition = null;
+    let targetRotation = null;
+    let credits = 0;  // Player's credits
+    const ingredients = [];  // Array to store all spawned ingredients
+    const moveSpeed = 0.08;
+    const rotationSpeed = 0.05;
+    const gravity = -0.05;  // Gravity for dropping ingredients
+    const groundLevel = 0.05;  // Ground level for ingredients to stop falling
+    let rotating = true;
+    const originalColor = 0xff0000;
+    const selectedColor = 0x00ff00;
+    const rotationTolerance = 0.05;
+    const ingredientTypes = ['cheese', 'meat', 'tomato', 'lettuce', 'pickle'];
+    let ingredientHeight = 0.2;
+// Corrected initial height of the stack
+let ingredientStackHeight = -0.2;  // Top of the bottom bun is at y = -0.2
+
+
+    const spawnInterval = 3000;  // Interval for spawning new ingredients
+    const ingredientLifespan = 10000;  // Ingredient lifespan in milliseconds
+    const fadeDuration = 1000;  // Fade-out duration in milliseconds
+    let nextSpawnTime = performance.now() + spawnInterval;
+	  
+	  let cheeseCount = 0;  // Track the number of cheese slices
+let alienShip = null;  // Track the alien ship object
+let removingCheese = false;  // Track if the alien ship is in the process of removing cheese
+
+// Variable to track if the alien ship is flying away
+let isFlyingAway = false;
+	  let alienShipHealth = 3;  // Set the alien ship's initial health
+let tomatoBalls = [];  // Array to track active tomato sauce balls
+	  
+	  let tomatoAmmo = 0;  // Total tomato ammo
+const shotsPerTomato = 5;  // Each tomato provides 5 shots
+
+    init();
+
+    function init() {
+      // Create scene and camera
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.set(0, 5, 10);
+
+      // Renderer with shadow enabled
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      document.body.appendChild(renderer.domElement);
+
+      // Ground in Three.js
+      const groundGeometry = new THREE.PlaneGeometry(20, 20);
+      const groundMaterial = new THREE.MeshStandardMaterial({ color: 0x228B22 });
+      const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+      ground.rotation.x = -Math.PI / 2;
+      ground.receiveShadow = true;
+      scene.add(ground);
+
+      // Create an invisible Object3D as the parent for the burger (no visible geometry)
+		box = new THREE.Object3D();
+		box.position.set(0, 0.5, 0);
+		scene.add(box);
+		
+      // Burger in Three.js (part of the box)
+      burger = createBurger();
+      box.add(burger);
+
+      // Lighting
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+      scene.add(ambientLight);
+
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+      directionalLight.position.set(10, 20, 10);
+      directionalLight.castShadow = true;
+
+      directionalLight.shadow.camera.left = -20;
+      directionalLight.shadow.camera.right = 20;
+      directionalLight.shadow.camera.top = 20;
+      directionalLight.shadow.camera.bottom = -20;
+      directionalLight.shadow.camera.near = 1;
+      directionalLight.shadow.camera.far = 50;
+
+      directionalLight.shadow.mapSize.width = 2048;
+      directionalLight.shadow.mapSize.height = 2048;
+      directionalLight.shadow.bias = -0.0005;
+      scene.add(directionalLight);
+
+      // Orbit Controls
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
+
+      // Spawn initial ingredients
+      spawnIngredients(10);
+
+      // Event listener for left-click (movement orders)
+      window.addEventListener('click', onClick);
+
+      // Start rendering loop
+      animate();
+    }
+
+    // Create the burger (buns) in Three.js
+function createBurger() {
+  const burgerGroup = new THREE.Group();
+
+  // Bottom bun
+  const bottomBunGeometry = new THREE.CylinderGeometry(1, 1, 0.3, 32);
+  const bottomBunMaterial = new THREE.MeshStandardMaterial({ color: 0xDEB887 });
+  const bottomBun = new THREE.Mesh(bottomBunGeometry, bottomBunMaterial);
+  bottomBun.position.set(0, -0.35, 0);  // Set the bottom bun so its bottom face is at y = 0
+  bottomBun.castShadow = true;
+
+  // Top bun
+  const topBunGeometry = new THREE.CylinderGeometry(1, 1, 0.3, 32);
+  const topBunMaterial = new THREE.MeshStandardMaterial({ color: 0xDEB887 });
+  topBun = new THREE.Mesh(topBunGeometry, topBunMaterial);
+  topBun.position.set(0, 0.45, 0);  // Initially placed just above the bottom bun
+  topBun.castShadow = true;
+
+  burgerGroup.add(bottomBun);
+  burgerGroup.add(topBun);
+
+  return burgerGroup;
+}
+
+
+
+// Function to shoot a tomato sauce ball
+// Function to shoot a tomato sauce ball
+function shootTomatoSauce(targetPosition) {
+	
+	if (tomatoAmmo <= 0) {
+    console.log("Out of ammo!");
+    return;  // No ammo left, can't shoot
+  }
+	
+  const tomatoGeometry = new THREE.SphereGeometry(0.2, 32, 32);  // Create a small ball for tomato sauce
+  const tomatoMaterial = new THREE.MeshStandardMaterial({ color: 0xff6347 });  // Tomato color
+  const tomatoBall = new THREE.Mesh(tomatoGeometry, tomatoMaterial);
+
+  // Get the world position of the top bun
+  const topBunWorldPosition = new THREE.Vector3();
+  topBun.getWorldPosition(topBunWorldPosition);  // Get the top bun position
+
+  // Set the tomato sauce ball to start at the top of the burger's top bun
+  tomatoBall.position.set(topBunWorldPosition.x, topBunWorldPosition.y + 0.2, topBunWorldPosition.z);  // Slightly above the bun
+
+  // Calculate direction towards the target
+  const direction = new THREE.Vector3().subVectors(targetPosition, tomatoBall.position).normalize();
+
+  tomatoBall.userData = { direction };  // Store direction in userData
+  scene.add(tomatoBall);
+  tomatoBalls.push(tomatoBall);  // Track the tomato ball
+	
+	 // Decrease ammo by 1 with each shot
+  tomatoAmmo--;
+
+  // Check if we need to remove a tomato from the burger
+  if (tomatoAmmo % shotsPerTomato === 0) {
+    removeTomatoFromBurger();
+  }
+
+  console.log(`Tomato ammo remaining: ${tomatoAmmo}`);
+}
+	  
+// Function to remove a tomato from the burger
+function removeTomatoFromBurger() {
+  const tomatoSlices = burger.children.filter(child => child.userData.type === 'tomato');
+
+  if (tomatoSlices.length > 0) {
+    const tomatoSlice = tomatoSlices[0];  // Get the first tomato slice
+    burger.remove(tomatoSlice);  // Remove the tomato slice from the burger
+    ingredientStackHeight = -0.2;
+    recalculateIngredientPositions();  // Recalculate the position of other ingredients
+    updateIngredientList();  // Update the ingredient list in the UI
+  }
+}
+
+// Function to update the tomato sauce ball positions
+function updateTomatoBalls() {
+  for (let i = tomatoBalls.length - 1; i >= 0; i--) {
+    const tomatoBall = tomatoBalls[i];
+
+    // Move the ball in its direction
+    tomatoBall.position.addScaledVector(tomatoBall.userData.direction, 0.2);  // Adjust speed as needed
+
+    // Check if the ball hits the alien ship
+    if (alienShip && tomatoBall.position.distanceTo(alienShip.position) < 1) {
+      alienShipHealth--;  // Decrease health on hit
+      scene.remove(tomatoBall);  // Remove the ball from the scene
+      tomatoBalls.splice(i, 1);  // Remove the ball from the array
+
+      // Check if the alien ship is destroyed
+      if (alienShipHealth <= 0) {
+        destroyAlienShip();  // Call function to handle ship destruction
+      }
+    }
+
+    // Remove the tomato ball if it moves too far (out of bounds)
+    if (tomatoBall.position.y < -10 || tomatoBall.position.distanceTo(box.position) > 50) {
+      scene.remove(tomatoBall);
+      tomatoBalls.splice(i, 1);
+    }
+  }
+}
+
+// Function to destroy the alien ship, blow it into pieces, and drop cheese
+function destroyAlienShip() {
+  if (!alienShip) return;
+
+  // Break the alien ship into pieces (we'll use small flat cylinders for each fragment)
+  const numPieces = 5;  // Number of pieces the ship will break into
+  const pieces = [];
+  
+  for (let i = 0; i < numPieces; i++) {
+    const geometry = new THREE.BoxGeometry(0.3, 0.3, 0.05, 32);  // Smaller flat cylinders
+    const material = new THREE.MeshStandardMaterial({ color: 0x00ff00, emissive: 0x00ff00 });
+    const piece = new THREE.Mesh(geometry, material);
+    piece.position.copy(alienShip.position);  // Start at the alien ship's position
+    piece.castShadow = true;
+    scene.add(piece);
+    pieces.push(piece);
+  }
+
+  // Remove the original alien ship
+  scene.remove(alienShip);
+  alienShip = null;
+
+  // Animate the pieces flying away in random directions
+  pieces.forEach(piece => {
+    const randomDirection = new THREE.Vector3(
+      (Math.random() - 0.5) * 2,  // Random X
+      Math.random() * 2,  // Random Y (always positive to make the pieces fly up)
+      (Math.random() - 0.5) * 2  // Random Z
+    ).normalize();
+
+    const speed = 0.2 + Math.random() * 0.2;  // Random speed for each piece
+
+    // Animate the pieces flying away
+    const flyPieceInterval = setInterval(() => {
+      piece.position.addScaledVector(randomDirection, speed);
+      piece.rotation.x += 0.1;  // Add some rotation for effect
+      piece.rotation.z += 0.1;
+
+      // Remove the piece when it flies far enough away
+      if (piece.position.distanceTo(box.position) > 50) {
+        clearInterval(flyPieceInterval);
+        scene.remove(piece);  // Remove the piece from the scene
+      }
+    }, 50);  // Update every 50ms
+  });
+
+  // Stop any cheese slices from moving and drop them to the ground
+  const cheeseSlices = scene.children.filter(child => child.userData.type === 'cheese');
+  for (const cheeseSlice of cheeseSlices) {
+    cheeseSlice.userData.isMoving = false;  // Stop movement
+    cheeseSlice.position.y = groundLevel;  // Drop to the ground
+  }
+}
+
+
+
+// Function to get the height of a mesh dynamically using its bounding box
+function getMeshHeight(mesh) {
+  const boundingBox = new THREE.Box3().setFromObject(mesh);
+  return boundingBox.max.y - boundingBox.min.y;
+}
+
+
+    // Function to spawn random ingredients on the map
+    function spawnIngredients(count) {
+      for (let i = 0; i < count; i++) {
+        const type = ingredientTypes[Math.floor(Math.random() * ingredientTypes.length)];
+        const ingredient = createIngredient(type);
+
+        ingredient.position.set((Math.random() - 0.5) * 20, 5, (Math.random() - 0.5) * 20);  // Random XZ position
+        const randomLifespan = ingredientLifespan + Math.random() * 10000;  // Random extra lifespan up to 10s
+        ingredient.userData = { lifeSpan: performance.now() + randomLifespan, fadeStart: null, falling: true, type: type, name : type.charAt(0).toUpperCase() + type.slice(1)  };
+
+        ingredients.push(ingredient);
+        scene.add(ingredient);
+      }
+    }
+
+// Function to create specific ingredients in Three.js
+function createIngredient(type) {
+  let geometry, material;
+  const colorMap = {
+    cheese: 0xffe135,
+    meat: 0x8B4513,
+    tomato: 0xff6347,
+    lettuce: 0x228B22,
+    pickle: 0x9ACD32
+  };
+
+  // Create ingredient geometries with specific adjustments
+  if (type === 'cheese') {
+    geometry = new THREE.BoxGeometry(1.5, 0.05, 1.5);  // Flat square for cheese
+  } else if (type === 'lettuce') {
+    geometry = new THREE.BoxGeometry(1.75, 0.02, 1.25);  // Thin cylinder for lettuce
+  } else if (type === 'pickle') {
+    geometry = new THREE.CylinderGeometry(0.5, 0.5, 0.1, 32);  // Small cylinder for pickles
+  } else if (type === 'tomato') {
+    geometry = new THREE.CylinderGeometry(0.8, 0.8, 0.1, 32);  // Smaller cylinder for tomatoes
+  } else {
+    geometry = new THREE.CylinderGeometry(1, 1, ingredientHeight, 32);  // Default cylinder for other ingredients
+  }
+
+  material = new THREE.MeshStandardMaterial({ color: colorMap[type], transparent: true, opacity: 1 });
+  const ingredient = new THREE.Mesh(geometry, material);
+
+  return ingredient;
+}
+	  
+function removeIngredient(index) {
+  const ingredient = burger.children[index];
+  burger.remove(ingredient); // Remove the ingredient from the burger
+
+  // Recalculate positions
+    ingredientStackHeight = -0.2;
+    recalculateIngredientPositions();
+
+  // Reposition the top bun
+  const topBunHeight = getMeshHeight(topBun);
+  topBun.position.y = ingredientStackHeight + (topBunHeight / 2);
+
+  // Update the UI
+  openIngredientMenu();
+}
+	  
+function recalculateIngredientPositions() {
+  // Loop through the burger's children, starting from the third element (index 2),
+  // which would be the first actual ingredient.
+  ingredientStackHeight = -0.2;  // Reset the stack height to just above the bottom bun.
+  
+  for (let i = 2; i < burger.children.length; i++) {  // Start after the buns
+    const ingredient = burger.children[i];
+
+    // Calculate the height of the ingredient dynamically
+    const ingredientHeight = getMeshHeight(ingredient);
+
+    // Apply random slight X/Z offsets for ingredient re-stacking
+    const randomXOffset = (Math.random() - 0.5) * 0.1;
+    const randomZOffset = (Math.random() - 0.5) * 0.1;
+
+    // Re-stack ingredient based on the updated ingredientStackHeight
+    ingredient.position.set(randomXOffset, ingredientStackHeight + (ingredientHeight / 2), randomZOffset);
+    ingredientStackHeight += ingredientHeight;
+  }
+
+  // Move the top bun to the correct height (just above the stacked ingredients)
+  const topBunHeight = getMeshHeight(burger.children[1]);  // Assuming the second child is the top bun
+  burger.children[1].position.y = ingredientStackHeight + (topBunHeight / 2);  // Adjust top bun height
+}
+	  
+// Function to handle mouse down events for both movement and shooting
+function onClick(event) {
+  event.preventDefault();
+
+  const mouse = new THREE.Vector2();
+  mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(mouse, camera);
+
+  const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -groundLevel);  // Horizontal ground plane
+  const targetPoint = new THREE.Vector3();
+
+  // Raycast against all objects in the scene and burger's children
+  const burgerObjects = [burger, ...burger.children];
+  const intersects = raycaster.intersectObjects([...burgerObjects, ...scene.children], true);
+
+  if (intersects.length > 0) {
+    const intersect = intersects[0];
+
+    // Right click (button 2): Shoot tomato sauce
+    if (event.button === 2 && alienShip) {
+      shootTomatoSauce(intersect.point);
+    } else if (event.button === 0) {
+      // Left click (button 0): Handle movement or UI opening
+
+      // If the user clicks on the burger or its children, open the ingredient menu
+      if (burgerObjects.includes(intersect.object)) {
+        console.log('Burger clicked');
+        openIngredientMenu();
+      } else if (raycaster.ray.intersectPlane(groundPlane, targetPoint)) {
+        // Handle movement orders on the ground plane
+        const maxX = 10;  // Maximum X boundary
+        const maxZ = 10;  // Maximum Z boundary
+
+        // Clamp the target position within the defined boundaries
+        targetPoint.x = Math.max(-maxX, Math.min(maxX, targetPoint.x));
+        targetPoint.z = Math.max(-maxZ, Math.min(maxZ, targetPoint.z));
+
+        // Update the target position and rotation for movement
+        targetPosition = targetPoint.clone();
+        targetRotation = calculateTargetRotation(box.position, targetPosition);
+        rotating = true;
+      }
+    }
+  }
+}
+
+// Disable the context menu that appears on right-click
+window.addEventListener('contextmenu', (event) => event.preventDefault());
+
+// Add the mouse down event listener
+window.addEventListener('mousedown', onClick);
+
+
+
+
+	  
+function openIngredientMenu() {
+  updateIngredientList();
+
+  // Show the ingredient removal UI
+  $('#ingredientMenu').show();
+}
+	  
+function updateIngredientList() {
+  const ingredientList = $('#ingredientList');
+  ingredientList.empty();  // Clear the existing list
+
+  // Rebuild the ingredient list, skipping the bottom bun (index 0) and top bun (index 1)
+  for (let i = 2; i < burger.children.length; i++) {  // Exclude the buns
+    const ingredient = burger.children[i];
+	  console.log(ingredient);
+    const ingredientName = ingredient.userData.name || 'Unknown';
+
+    // Add ingredient to the list with a remove button
+    ingredientList.prepend(`<li>${ingredientName} <button onclick="removeIngredient(${i})">Remove</button></li>`);
+  }
+}
+
+// Close the menu when the close button is clicked
+$('#closeMenu').on('click', () => {
+  $('#ingredientMenu').hide();
+});
+
+
+// Function to add ingredient to the burger with random placement and rotation
+function addIngredientToBurger(ingredient) {
+  const ingredientClone = ingredient.clone();
+
+  // Calculate the height of the ingredient dynamically
+  const ingredientHeight = getMeshHeight(ingredientClone);
+
+  // Apply random rotation and slight random placement for more variation
+  const randomRotation = (Math.random() - 0.5) * Math.PI / 4;
+  const randomXOffset = (Math.random() - 0.5) * 0.1;  // Small random offset for x position
+  const randomZOffset = (Math.random() - 0.5) * 0.1;  // Small random offset for z position
+
+  // Stack the ingredient based on the current height of the stack (bottom bun + previous ingredients)
+  ingredientClone.position.set(randomXOffset, ingredientStackHeight + (ingredientHeight / 2), randomZOffset);
+  ingredientClone.rotation.set(0, randomRotation, 0);  // Apply random rotation
+  burger.add(ingredientClone);
+
+  // Update the total height of the stack AFTER placing the ingredient
+  ingredientStackHeight += ingredientHeight;
+
+  // Move the top bun to the correct height (total ingredient stack height + half top bun height)
+  const topBunHeight = getMeshHeight(topBun);
+  topBun.position.y = ingredientStackHeight + (topBunHeight / 2);  // Adjust top bun height to sit properly
+
+  // Remove the ingredient from the scene
+  scene.remove(ingredient);
+  ingredients.splice(ingredients.indexOf(ingredient), 1);
+
+  // Update credits
+  credits += 10;  // Increase credits by 10 per collected ingredient
+  document.getElementById('credits').innerText = credits;
+	
+	updateIngredientList();
+	
+	// Track cheese count
+	  if (ingredientClone.userData.type === 'cheese') {
+		cheeseCount++;
+
+		// If more than 4 slices of cheese, spawn alien ship
+		if (cheeseCount > 4 && !alienShip) {
+		  spawnAlienShip();
+		}
+	  }
+	
+	// Update ammo if a tomato is added
+  if (ingredientClone.userData.type === 'tomato') {
+    tomatoAmmo += shotsPerTomato;  // Each tomato adds 5 ammo
+  }
+}
+	  
+	  // Function to spawn the alien ship
+function spawnAlienShip() {
+  const geometry = new THREE.CylinderGeometry(1.5, 1.5, 0.1, 32);  // Flat cylinder for alien ship
+  const material = new THREE.MeshStandardMaterial({ color: 0x00ff00, emissive: 0x00ff00 });
+  alienShip = new THREE.Mesh(geometry, material);
+  alienShip.position.set(box.position.x, ingredientStackHeight + 4, box.position.z);  // Hover above the burger
+  alienShip.castShadow = true;
+  scene.add(alienShip);
+  
+  removingCheese = true;
+  removeCheeseSlices();  // Start removing cheese slices
+}
+
+// Function to remove cheese slices one by one and animate towards the alien ship
+function removeCheeseSlices() {
+  if (!removingCheese) return;  // Stop if the process has ended
+
+  const cheeseSlices = burger.children.filter(child => child.userData.type === 'cheese');
+
+  if (cheeseSlices.length > 0) {
+    const cheeseSlice = cheeseSlices[0];  // Get the first cheese slice
+
+    // Get the current world position of the cheese slice before removing it from the burger
+    const cheeseWorldPosition = new THREE.Vector3();
+    cheeseSlice.getWorldPosition(cheeseWorldPosition);
+
+    // Remove the cheese slice from the burger and add it to the scene at its last position
+    burger.remove(cheeseSlice);
+    cheeseSlice.position.copy(cheeseWorldPosition);  // Set the cheese slice's position in the scene
+    scene.add(cheeseSlice);
+
+    const moveCheeseInterval = setInterval(() => {
+      const direction = new THREE.Vector3();
+      direction.subVectors(alienShip.position, cheeseSlice.position).normalize();  // Calculate direction towards the ship
+
+      // Move the cheese slice towards the alien ship
+      cheeseSlice.position.addScaledVector(direction, 0.05);  // Move towards the alien ship
+
+      // Check if cheese slice is close enough to the alien ship to remove it
+      if (cheeseSlice.position.distanceTo(alienShip.position) < 1) {
+        clearInterval(moveCheeseInterval);  // Stop the movement
+
+        scene.remove(cheeseSlice);  // Remove the cheese slice from the scene
+
+        cheeseCount--;  // Decrease cheese count
+        ingredientStackHeight = -0.2;
+        recalculateIngredientPositions();
+        updateIngredientList();
+
+        // Reposition the top bun
+        const topBunHeight = getMeshHeight(topBun);
+        topBun.position.y = ingredientStackHeight + (topBunHeight / 2);
+
+        // Check if more cheese slices remain
+        if (cheeseCount > 0) {
+          removeCheeseSlices();  // Continue removing cheese slices
+        } else {
+          removingCheese = false;  // Stop removing cheese
+          flyAwayAlienShip();
+        }
+      }
+    }, 50);  // Update every 50ms (20 frames per second)
+  }
+}
+
+
+// Function to make the alien ship fly away after removing all cheese
+function flyAwayAlienShip() {
+  isFlyingAway = true;  // Mark that the ship is flying away
+  const targetPosition = new THREE.Vector3(alienShip.position.x + 10, alienShip.position.y + 5, alienShip.position.z);  // Fly off to the side and up
+
+  const flyAwayInterval = setInterval(() => {
+    const direction = new THREE.Vector3().subVectors(targetPosition, alienShip.position).normalize();
+    alienShip.position.addScaledVector(direction, 0.1);  // Move away smoothly
+
+    // Slight rotation for visual effect as it flies away
+    //alienShip.rotation.x += 0.05;
+    //alienShip.rotation.z += 0.05;
+    alienShip.position.y += 0.05;
+
+    // Remove the ship once it flies far enough away
+    if (alienShip.position.distanceTo(targetPosition) < 0.2) {
+      clearInterval(flyAwayInterval);
+      scene.remove(alienShip);  // Remove the alien ship from the scene
+      alienShip = null;
+      isFlyingAway = false;  // Reset the flag after the ship is removed
+    }
+  }, 50);  // Update every 50ms
+}
+
+
+    // Function to select an object and change its color
+    function selectObject(object) {
+      object.material.color.set(selectedColor);
+      selectedObject = object;
+    }
+
+    // Calculate target rotation based on target position
+    function calculateTargetRotation(currentPosition, targetPosition) {
+      const direction = new THREE.Vector3();
+      direction.subVectors(targetPosition, currentPosition);
+      return Math.atan2(direction.x, direction.z);
+    }
+
+    // Normalize angle to range [-π, π]
+    function normalizeAngle(angle) {
+      while (angle > Math.PI) angle -= 2 * Math.PI;
+      while (angle < -Math.PI) angle += 2 * Math.PI;
+      return angle;
+    }
+
+    // Smoothly rotate the box to face the target with the shortest path
+    function rotateToFace(box, targetRotation) {
+      const currentRotation = box.rotation.y;
+      let difference = normalizeAngle(targetRotation - currentRotation);
+
+      if (Math.abs(difference) > rotationTolerance) {
+        const step = rotationSpeed * Math.sign(difference);
+        box.rotation.y += step;
+        rotating = true;
+      } else {
+        box.rotation.y = targetRotation;
+        rotating = false;
+      }
+    }
+
+    // Animate movement and check for ingredient collection
+    function animate() {
+      requestAnimationFrame(animate);
+		
+		 // Update tomato sauce balls
+  updateTomatoBalls();
+
+      if (targetPosition) {
+        if (rotating) {
+          rotateToFace(box, targetRotation);
+        } else {
+          moveBox();
+        }
+      }
+
+      // Handle ingredient expiration, fading, and falling
+      const currentTime = performance.now();
+      for (let i = ingredients.length - 1; i >= 0; i--) {
+        const ingredient = ingredients[i];
+        const timeLeft = ingredient.userData.lifeSpan - currentTime;
+
+        // Ingredient falling
+        if (ingredient.userData.falling) {
+          ingredient.position.y += gravity;
+          if (ingredient.position.y <= groundLevel) {
+            ingredient.position.y = groundLevel;  // Stop when it hits the ground
+            ingredient.userData.falling = false;
+          }
+        }
+
+        // Handle expiration and fading
+        if (timeLeft <= 0) {
+          // Start fading out
+          if (!ingredient.userData.fadeStart) {
+            ingredient.userData.fadeStart = currentTime;
+          }
+          const fadeProgress = (currentTime - ingredient.userData.fadeStart) / fadeDuration;
+          ingredient.material.opacity = 1 - fadeProgress;
+
+          // Remove fully faded ingredients
+          if (fadeProgress >= 1) {
+            scene.remove(ingredient);
+            ingredients.splice(i, 1);
+          }
+        }
+      }
+		
+	// Handle alien ship hovering
+  if (alienShip && !isFlyingAway) {
+    alienShip.position.x = box.position.x + Math.sin(performance.now() * 0.005) * 1;  // Circular hover
+    alienShip.position.z = box.position.z + Math.cos(performance.now() * 0.005) * 1;
+    alienShip.position.y = ingredientStackHeight + 4 + Math.sin(performance.now() * 0.003) * 0.1;  // Vertical hover
+  }
+
+		
+      checkIngredientCollection();
+      spawnNewIngredients();
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+// Variable to track the wobble state
+let wobbleAngle = 0;
+let isMoving = false;  // Track whether the box is moving
+
+function moveBox() {
+  if (!targetPosition) return;
+
+  const direction = new THREE.Vector3();
+  direction.subVectors(targetPosition, box.position).normalize();
+
+  // Calculate the distance based on the box's bottom (not its center)
+  const boxBottom = box.position.clone();
+  boxBottom.y -= 0.5;  // Assuming the box height is 1, this puts it at the bottom
+
+  const distance = boxBottom.distanceTo(targetPosition);
+
+  // Check if we're close enough to the target
+  if (distance > 0.1) {  // The box is still far from the target
+    isMoving = true;
+    
+    // Move the box toward the target
+    box.position.addScaledVector(direction, moveSpeed);
+
+    // Increment wobble angle only when moving
+    wobbleAngle += 0.1;
+
+    // Make the burger wobble left to right like it's walking
+    const wobbleFrequency = 5;  // Frequency of the wobble
+    const wobbleAmplitude = 0.05;  // Amplitude of the wobble
+    const wobbleOffset = Math.sin(performance.now() * 0.005 * wobbleFrequency) * wobbleAmplitude;
+
+    burger.rotation.z = wobbleOffset;  // Apply the wobble to the z-axis for left-right tilting
+
+    // Keep the y position constant to ensure the box stays at the correct height above the ground
+    box.position.y = 0.5;
+  } else {
+    if (isMoving) {
+      // Stop wobbling and reset when the box reaches the target
+      burger.rotation.z = 0;  // Reset the wobble to 0 when the target is reached
+      wobbleAngle = 0;  // Reset wobble angle
+      targetPosition = null;  // Clear the target to stop further movement
+      isMoving = false;  // Mark that the box is no longer moving
+    }
+  }
+}
+
+
+    // Check if the box collides with any ingredients
+    function checkIngredientCollection() {
+      for (let i = ingredients.length - 1; i >= 0; i--) {
+        const ingredient = ingredients[i];
+        const distance = box.position.distanceTo(ingredient.position);
+        if (distance < 1) {  // If close enough to collect
+          addIngredientToBurger(ingredient);
+        }
+      }
+    }
+
+    // Spawn new ingredients periodically
+    function spawnNewIngredients() {
+      if (performance.now() > nextSpawnTime) {
+        spawnIngredients(1);
+        nextSpawnTime = performance.now() + spawnInterval;
+      }
+    }
+	  
+	  
+  </script>
+</body>
+</html>
